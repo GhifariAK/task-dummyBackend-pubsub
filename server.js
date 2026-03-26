@@ -8,33 +8,8 @@ app.use(express.json());
 require('dotenv').config();
 const pool = require('./db'); 
 
-// SETUP PUBSUB (BACKGROUND TASK)
-const EventEmitter = require('events');
-const pubsub = new EventEmitter();
-
-// SUBSCRIBER: Mengeksekusi query INSERT ke database
-pubsub.on('create_user_event', async (userData) => {
-    try {
-        const { username, full_name, email_address, password } = userData;
-        
-        const query = `
-            INSERT INTO tb_users (username, full_name, email_address, password, tenant_id, type, status_ad, create_at) 
-            VALUES ($1, $2, $3, $4, 50, 1, 0, NOW()) 
-            RETURNING *
-        `;
-
-        const values = [username, full_name, email_address, password];
-        const newUser = await pool.query(query, values);
-        
-        console.log(`\n[SUBSCRIBER SUKSES] -> User baru berhasil dibuat di database:`);
-        console.log(newUser.rows[0]);
-    } catch (err) {
-        console.error(`\n[SUBSCRIBER ERROR] -> Gagal membuat user:`, err.message);
-    }
-});
-
-// PUBLISHER: Menerima request dari Frontend
-app.post('/api/pubsub/user', (req, res) => {
+// Create User
+app.post('/api/users', async (req, res) => {
     try {
         const { username, full_name, email_address, password } = req.body;
 
@@ -42,16 +17,27 @@ app.post('/api/pubsub/user', (req, res) => {
             return res.status(400).json({ success: false, message: 'Semua field wajib diisi' });
         }
 
-        // Publisher menyiarkan event beserta datanya ke Subscriber
-        pubsub.emit('create_user_event', { username, full_name, email_address, password });
+        // Query
+        const query = `
+                INSERT INTO tb_users (username, full_name, email_address, password, tenant_id, type, status_ad, create_at) 
+                VALUES ($1, $2, $3, $4, 50, 1, 0, NOW()) 
+                RETURNING *
+        `;
 
-        // Publisher langsung membalas ke Frontend TANPA menunggu proses insert DB selesai
-        res.json({ 
+        const values = [username, full_name, email_address, password];
+        const newUser = await pool.query(query, values);
+
+        console.log(`\n[CREATE SUKSES] -> User baru berhasil dibuat di database:`);
+        console.log(newUser.rows[0]);
+
+        // Balas FE kalau sudah sukses masuk DB
+        res.status(201).json({ 
             success: true, 
-            message: 'Request diterima! User sedang dibuat di background oleh Subscriber.' 
+            message: 'User berhasil dibuat!',
+            data: newUser.rows[0]
         });
     } catch (err) {
-        console.error(err.message);
+        console.error(`\n[CREATE ERROR] -> Gagal membuat user:`, err.message);
         res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server' });
     }
 });
